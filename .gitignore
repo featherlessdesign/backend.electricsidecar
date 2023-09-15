@@ -1,0 +1,12 @@
+Packages
+.build
+xcuserdata
+*.xcodeproj
+DerivedData/
+.DS_Store
+db.sqlite
+.swiftpm
+.env
+*.p8
+Sources/App/backend-logger.json
+Sources/App/serverconfig.json
