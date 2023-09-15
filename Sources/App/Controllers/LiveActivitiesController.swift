@@ -127,7 +127,7 @@ struct LiveActivitiesController: RouteCollection {
 
     let readout: GarageModel.Vehicle.Readout
 
-    req.logger.info("Updating live activity for \(registration.vin)")
+    req.logger.info("Updating live activity for \(registration.pushToken)")
 
     switch registration.dataSource {
     case .porsche:
