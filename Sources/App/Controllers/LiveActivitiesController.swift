@@ -25,6 +25,7 @@ final class RegisteredLiveActivity {
   let job: Job
 
   var lastUpdate: Date?
+  var lastReadout: GarageModel.Vehicle.Readout?
   var porscheCapabilities: Capabilities?
 }
 
@@ -178,6 +179,12 @@ struct LiveActivitiesController: RouteCollection {
       return
     }
 
+    if activity.lastReadout == readout {
+      req.logger.info("Skipping APNS due to lack of change for \(registration.pushToken)")
+      // Skip update because nothing's changed since the last time.
+      return
+    }
+
     req.logger.info("Sending APNS update \(readout) to \(registration.pushToken)")
 
     let event: APNSLiveActivityNotificationEvent = readout.isCharging ? .update : .end
@@ -194,6 +201,7 @@ struct LiveActivitiesController: RouteCollection {
     // Send the notification
     try await app.apns.client.sendLiveActivityNotification(notification, deviceToken: registration.pushToken)
 
+    activity.lastReadout = readout
     activity.lastUpdate = .now
 
     if !readout.isCharging {
