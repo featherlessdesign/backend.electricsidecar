@@ -33,6 +33,9 @@ private var activities: [String: RegisteredLiveActivity] = [:]
 private let networkClient = NetworkClient()
 private let porscheEndpoints = PorscheAPIEndpoints()
 
+private let fastChargeInterval = (60)
+private let slowChargeInterval = (60 * 2 + 30)
+
 struct LiveActivitiesController: RouteCollection {
   func boot(routes: RoutesBuilder) throws {
     routes.post("start_charging", use: startCharging)
@@ -57,7 +60,7 @@ struct LiveActivitiesController: RouteCollection {
       req.logger.info("Scheduling timer for live activity \(registration.pushToken)")
 
       var job: Job?
-      job = Jobs.add(interval: 60.seconds, autoStart: false) {
+      job = Jobs.add(interval: slowChargeInterval.seconds, autoStart: false) {
         Task {
           do {
             try await updateLiveActivity(req: req, registration: registration, app: req.application)
@@ -73,10 +76,14 @@ struct LiveActivitiesController: RouteCollection {
         return "failed to register"
       }
 
-      activities[registration.identifier] = RegisteredLiveActivity(
+      let activity = RegisteredLiveActivity(
         registration: registration,
         job: job
       )
+      activities[registration.identifier] = activity
+
+      // Prime the activity.
+      try await updateLiveActivity(req: req, registration: registration, app: req.application)
 
       job.start()
 
@@ -169,8 +176,7 @@ struct LiveActivitiesController: RouteCollection {
       readout = GarageModel.Vehicle.Readout.ev(
         .init(
           batteryLevel: 25,
-          isCharging: true,
-          isPluggedIn: true,
+          state: .charging,
           chargeRateInKmPerHour: 10,
           chargeRateInKW: 4
         )
@@ -187,24 +193,47 @@ struct LiveActivitiesController: RouteCollection {
 
     req.logger.info("Sending APNS update \(readout) to \(registration.pushToken)")
 
-    let event: APNSLiveActivityNotificationEvent = readout.isCharging ? .update : .end
+    let event: APNSLiveActivityNotificationEvent = readout.state == .charging ? .update : .end
 
-    let notification = APNSLiveActivityNotification(
-      expiration: .immediately,
-      priority: .consideringDevicePower,
-      appID: "com.featherless.apps.electricsidecar",
-      contentState: ChargingActivityContentState(readout: readout),
-      event: event,
-      timestamp: Int(Date.now.timeIntervalSince1970),
-      dismissalDate: .date(.now.addingTimeInterval(60 * 5))
-    )
-    // Send the notification
-    try await app.apns.client.sendLiveActivityNotification(notification, deviceToken: registration.pushToken)
+    switch registration.version {
+    case .v2:
+      let notification = APNSLiveActivityNotification(
+        expiration: .immediately,
+        priority: .consideringDevicePower,
+        appID: "com.featherless.apps.electricsidecar",
+        contentState: ChargingActivityContentState(readout: readout),
+        event: event,
+        timestamp: Int(Date.now.timeIntervalSince1970),
+        dismissalDate: .date(.now.addingTimeInterval(60 * 5))
+      )
+      try await app.apns.client.sendLiveActivityNotification(notification, deviceToken: registration.pushToken)
+
+    case .v1: fallthrough
+    default:
+      let notification = APNSLiveActivityNotification(
+        expiration: .immediately,
+        priority: .consideringDevicePower,
+        appID: "com.featherless.apps.electricsidecar",
+        contentState: ChargingActivityContentStateV1(readout: .init(v2: readout)),
+        event: event,
+        timestamp: Int(Date.now.timeIntervalSince1970),
+        dismissalDate: .date(.now.addingTimeInterval(60 * 5))
+      )
+      try await app.apns.client.sendLiveActivityNotification(notification, deviceToken: registration.pushToken)
+    }
+
+    if let chargeRateInKW = readout.electricReadout?.chargeRateInKW {
+      if chargeRateInKW > 100 {
+        activity.job.interval = fastChargeInterval.seconds.unixTime
+      } else {
+        activity.job.interval = slowChargeInterval.seconds.unixTime
+      }
+    }
 
     activity.lastReadout = readout
     activity.lastUpdate = .now
 
-    if !readout.isCharging {
+    if readout.state != .charging {
       req.logger.info("Charging completed. Terminating live update.")
       try await terminateLiveActivity(req: req, identifier: registration.identifier)
     }

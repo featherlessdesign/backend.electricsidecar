@@ -8,5 +8,5 @@ db.sqlite
 .swiftpm
 .env
 *.p8
-Sources/App/backend-logger.json
-Sources/App/serverconfig.json
+backend-logger.json
+serverconfig.json

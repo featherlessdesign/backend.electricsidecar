@@ -5,7 +5,7 @@ import Jobs
 import Logging
 import Vapor
 
-let logger = Logger(label: "global")
+let logger = Logger(label: "activities")
 typealias LogKey = GoogleCloudLogHandler.MetadataKey
 
 /// This extension is temporary and can be removed once Vapor gets this support.
@@ -26,14 +26,24 @@ private extension Vapor.Application {
   }
 }
 
+private func logHandlers(label: String) -> [LogHandler] {
+#if DEBUG
+  return [
+    StreamLogHandler.standardOutput(label: label)
+  ]
+#else
+  return [
+    GoogleCloudLogHandler(label: label),
+    StreamLogHandler.standardOutput(label: label)
+  ]
+#endif
+}
+
 @main
 enum Entrypoint {
   static func main() async throws {
     LoggingSystem.bootstrap {
-      MultiplexLogHandler([
-        GoogleCloudLogHandler(label: $0),
-        StreamLogHandler.standardOutput(label: $0)
-      ])
+      MultiplexLogHandler(logHandlers(label: $0))
     }
 
     do {
@@ -47,7 +57,7 @@ enum Entrypoint {
     }
 
     let env = try Environment.detect()
-    logger.info("Starting up backend service...")
+    logger.info("Starting up activities service...")
     logger.info("Arguments: \(CommandLine.arguments)")
     logger.info("Environment: \(env)")
 
